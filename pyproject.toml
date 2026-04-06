@@ -18,3 +18,7 @@ dependencies = [
     "streamlit>=1.56.0",
     "uvicorn>=0.43.0",
 ]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

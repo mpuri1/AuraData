@@ -1,0 +1,18 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Data and Logs (Best practice: ignore data in repo)
+*.csv
+*.json
+*.jsonl
+governance_log.md
+detailed_trace.jsonl
+WORK_LOG.md
