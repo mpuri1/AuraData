@@ -151,6 +151,8 @@ def coder_node(state: AgentState):
         code = "\n".join(lines).strip()
     return {"generated_code": code}
 
+def executor_node(state: AgentState):
+    """Executes the generated code and validates schema."""
     code = state["generated_code"]
     row = dict(state["input_data"]) 
     
