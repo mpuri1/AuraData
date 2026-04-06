@@ -2,9 +2,9 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Install project from pyproject.toml
-COPY pyproject.toml README.md ./
-RUN pip install --no-cache-dir .
+# Install dependencies
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
