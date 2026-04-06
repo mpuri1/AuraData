@@ -30,7 +30,16 @@ if 'anonymized_data' not in st.session_state:
 if 'audit_rejections' not in st.session_state:
     st.session_state.audit_rejections = 0
 
-# 2. Executive Summarization
+# System Security & Compliance 
+st.sidebar.markdown("## Governance Strategy")
+st.sidebar.info("""
+**Semantic Guardrails**: 
+Independent LLM Auditor node performs logical consistency checks with a prioritized rejection loop for semantic anomalies.
+
+**Privacy & Persistence**:
+PII Masking (ZIP/ID) and automated SQLite synchronization for persistent 'Golden Record' warehousing.
+""")
+
 st.subheader("Data Quality Governance Report")
 
 if st.session_state.failed_rows:
@@ -60,6 +69,8 @@ else:
 
 # 3. Agent Execution
 st.subheader("Refinement Execution")
+st.markdown("> [!TIP]\n> **Execution Strategy**: The LangGraph pipeline uses **GPT-5.4 Nano** to analyze schema violations, generate corrective Python code, and audit the results for logical semantic consistency before PII masking and SQLite persistence.")
+
 if st.button("Start Global Refinement Pipeline"):
     app = build_graph()
     logger = ObservabilityLogger()
@@ -101,8 +112,8 @@ if st.button("Start Global Refinement Pipeline"):
     status_text.success("Pipeline Execution Complete.")
 
 # 4. Refined Warehouse View
+st.subheader("Refined Anonymized Warehouse (SQLite Backend)")
 if len(st.session_state.anonymized_data) > 0:
-    st.subheader("Refined Anonymized Warehouse (SQLite Backend)")
     st.markdown("> [!IMPORTANT]\n> **PII Protection Active**: Claim IDs and ZIP codes have been asynchronously anonymized by the Privacy Node before persisting to SQLite.")
     
     tab1, tab2 = st.tabs(["Warehouse Preview", "Database Integrity"])
@@ -119,3 +130,5 @@ if len(st.session_state.anonymized_data) > 0:
             conn.close()
         except Exception as e:
             st.error(f"Could not connect to Warehouse: {e}")
+else:
+    st.info("The Warehouse is currently empty. Run the Refinement Pipeline to begin population.")
