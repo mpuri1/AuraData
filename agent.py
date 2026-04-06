@@ -97,6 +97,8 @@ def executor_node(state: AgentState):
     local_env = {}
     try:
         exec(code, {}, local_env)
+        if "fix_data" not in local_env:
+            raise ValueError("Code did not define a `fix_data` function.")
         fixed_row = local_env["fix_data"](row)
         ClaimSchema(**fixed_row)
         return {"execution_success": True, "fixed_data": fixed_row, "execution_error": None, "retry_count": state.get("retry_count", 0) + 1}
@@ -135,7 +137,7 @@ def privacy_node(state: AgentState):
     try:
         anonymized = json.loads(response.content)
         return {"anonymized_data": anonymized}
-    except:
+    except Exception:
         # Fallback manual mask if LLM fails format
         row = dict(state["fixed_data"])
         if row.get("zip_code"): row["zip_code"] = f"{str(row['zip_code'])[:3]}**"

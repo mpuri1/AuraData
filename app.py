@@ -89,7 +89,9 @@ if st.button("Start Global Refinement Pipeline"):
             "errors": row["errors"],
             "categories": row.get("categories", []),
             "retry_count": 0,
-            "audit_findings": []
+            "audit_findings": [],
+            "execution_success": False,
+            "is_audited": False
         }
         
         start_t = time.time()
