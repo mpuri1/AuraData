@@ -1,0 +1,11 @@
+.venv
+__pycache__
+.git
+.gitignore
+*.csv
+*.json
+*.jsonl
+governance_log.md
+Detailed_trace.jsonl
+README.md
+WORK_LOG.md
