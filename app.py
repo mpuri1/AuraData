@@ -23,11 +23,13 @@ if 'failed_rows' not in st.session_state:
 if 'fixed_data' not in st.session_state:
     st.session_state.fixed_data = []
 
+if 'audit_rejections' not in st.session_state:
+    st.session_state.audit_rejections = 0
+
 # 2. Executive Summarization
 st.subheader("Data Quality Governance Report")
 
 if st.session_state.failed_rows:
-    # Compile Summary Data
     summary_list = []
     for row in st.session_state.failed_rows:
         for cat in row.get("categories", ["Unknown"]):
@@ -35,7 +37,7 @@ if st.session_state.failed_rows:
     
     counts = pd.Series(summary_list).value_counts()
     
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric("Claims Processed", len(st.session_state.failed_rows))
     with col2:
@@ -43,9 +45,10 @@ if st.session_state.failed_rows:
     with col3:
         st.metric("Golden Records Resolved", counts.get("Duplication", 0))
     with col4:
+        st.metric("Semantic Hallucinations Caught", st.session_state.audit_rejections)
+    with col5:
         st.metric("Integrity Gains", f"{round((len(st.session_state.fixed_data) / len(st.session_state.failed_rows)) * 100, 1) if st.session_state.failed_rows else 0}%")
 
-    # Error Category Breakdown
     st.markdown("### Failure Distribution by Category")
     st.bar_chart(counts)
 else:
@@ -60,9 +63,7 @@ if st.button("Start Global Refinement Pipeline"):
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    # In a real system we'd process all, but for demo we take a sample to keep it fast
     sample_size = min(len(st.session_state.failed_rows), 50)
-    
     it_rows = st.session_state.failed_rows[:sample_size]
     
     for i, row in enumerate(it_rows):
@@ -72,17 +73,21 @@ if st.button("Start Global Refinement Pipeline"):
             "input_data": row["original_data"],
             "errors": row["errors"],
             "categories": row.get("categories", []),
-            "retry_count": 0
+            "retry_count": 0,
+            "audit_findings": []
         }
         
         start_t = time.time()
         result = app.invoke(initial_state)
         end_t = time.time()
         
+        if result.get("audit_findings") and not result.get("is_audited"):
+            st.session_state.audit_rejections += 1
+
         claim_id = result["input_data"].get("claim_id", f"unknown-{i}")
         logger.log_agent_execution(claim_id, start_t, end_t, result)
         
-        if result.get("execution_success"):
+        if result.get("execution_success") and result.get("is_audited"):
             st.session_state.fixed_data.append(result["fixed_data"])
             
         progress_bar.progress((i + 1) / sample_size)
