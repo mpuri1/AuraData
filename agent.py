@@ -31,7 +31,7 @@ class AgentState(TypedDict):
     anonymized_data: Optional[Dict[str, Any]] # PII Masked output
     db_status: Optional[str]        # Persistence verification
 
-llm = ChatOpenAI(model="gpt-5.4-nano", temperature=0)
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 
 def deduplication_node(state: AgentState):
     """Lead-Level Node: Resolves duplicate conflicts using window functions."""
@@ -87,8 +87,12 @@ def coder_node(state: AgentState):
     inputs = {"data": json.dumps(state["input_data"]), "analysis": state["analysis_result"], "error": state.get("execution_error", "")}
     response = chain.invoke(inputs)
     code = response.content.strip()
-    if code.startswith("```"): code = "\n".join(code.split("\n")[1:-1])
-    return {"generated_code": code.strip()}
+    if code.startswith("```"):
+        lines = code.split("\n")
+        if lines[0].startswith("```"): lines = lines[1:]
+        if lines[-1].startswith("```"): lines = lines[:-1]
+        code = "\n".join(lines).strip()
+    return {"generated_code": code}
 
 def executor_node(state: AgentState):
     """Executes the generated code and validates schema."""
@@ -97,6 +101,8 @@ def executor_node(state: AgentState):
     local_env = {}
     try:
         exec(code, {}, local_env)
+        if "fix_data" not in local_env:
+            raise ValueError("The generated code did not define a 'fix_data' function.")
         fixed_row = local_env["fix_data"](row)
         ClaimSchema(**fixed_row)
         return {"execution_success": True, "fixed_data": fixed_row, "execution_error": None, "retry_count": state.get("retry_count", 0) + 1}
@@ -135,7 +141,7 @@ def privacy_node(state: AgentState):
     try:
         anonymized = json.loads(response.content)
         return {"anonymized_data": anonymized}
-    except:
+    except Exception:
         # Fallback manual mask if LLM fails format
         row = dict(state["fixed_data"])
         if row.get("zip_code"): row["zip_code"] = f"{str(row['zip_code'])[:3]}**"
@@ -150,7 +156,8 @@ def persistence_node(state: AgentState):
     if not data: return {"db_status": "Skipped (No data)"}
 
     try:
-        conn = sqlite3.connect("refined_claims.db")
+        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "refined_claims.db")
+        conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS refined_records (

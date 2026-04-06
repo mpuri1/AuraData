@@ -69,9 +69,19 @@ else:
 
 # 3. Agent Execution
 st.subheader("Refinement Execution")
-st.markdown("> [!TIP]\n> **Execution Strategy**: The LangGraph pipeline uses **GPT-5.4 Nano** to analyze schema violations, generate corrective Python code, and audit the results for logical semantic consistency before PII masking and SQLite persistence.")
+st.markdown("> [!TIP]\n> **Execution Strategy**: The LangGraph pipeline uses **GPT-4o Mini** to analyze schema violations, generate corrective Python code, and audit the results for logical semantic consistency before PII masking and SQLite persistence.")
 
-if st.button("Start Global Refinement Pipeline"):
+col_run, col_reset = st.columns([1, 4])
+with col_run:
+    run_pipeline = st.button("Start Global Refinement Pipeline")
+with col_reset:
+    if st.button("Reset Execution Metrics"):
+        st.session_state.fixed_data = []
+        st.session_state.anonymized_data = []
+        st.session_state.audit_rejections = 0
+        st.rerun()
+
+if run_pipeline:
     app = build_graph()
     logger = ObservabilityLogger()
     
@@ -89,7 +99,9 @@ if st.button("Start Global Refinement Pipeline"):
             "errors": row["errors"],
             "categories": row.get("categories", []),
             "retry_count": 0,
-            "audit_findings": []
+            "audit_findings": [],
+            "execution_success": False,
+            "is_audited": False
         }
         
         start_t = time.time()
