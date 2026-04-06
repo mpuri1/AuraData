@@ -9,13 +9,10 @@ from dotenv import load_dotenv
 # Load variables from .env if present
 load_dotenv()
 
-st.set_page_config(page_title="AuraData | Autonomous ETL", layout="wide")
-st.title("AuraData: Autonomous Data Refinement Engine")
+st.set_page_config(page_title="AuraData | Governance Refinement", layout="wide")
+st.title("AuraData: Autonomous Governance & Refinement Engine")
 
-st.markdown("""
-This dashboard monitors our LangGraph agent as it autonomously fixes data anomalies.
-""")
-
+# 1. State Initialization
 if 'failed_rows' not in st.session_state:
     try:
         with open("failed_rows.json", "r") as f:
@@ -26,28 +23,55 @@ if 'failed_rows' not in st.session_state:
 if 'fixed_data' not in st.session_state:
     st.session_state.fixed_data = []
 
-col1, col2, col3 = st.columns(3)
-with col1:
-    st.metric("Total Failed Rows", len(st.session_state.failed_rows))
-with col2:
-    st.metric("Successfully Auto-Fixed", len(st.session_state.fixed_data))
-with col3:
-    st.metric("Estimated Cost Savings", f"${len(st.session_state.fixed_data) * 5.0}")
+# 2. Executive Summarization
+st.subheader("Data Quality Governance Report")
 
-st.subheader("Run Agent Pipeline")
-if st.button("Start Autonomous Fixer"):
+if st.session_state.failed_rows:
+    # Compile Summary Data
+    summary_list = []
+    for row in st.session_state.failed_rows:
+        for cat in row.get("categories", ["Unknown"]):
+            summary_list.append(cat)
+    
+    counts = pd.Series(summary_list).value_counts()
+    
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Claims Processed", len(st.session_state.failed_rows))
+    with col2:
+        st.metric("Auto-Fixed (ROI)", len(st.session_state.fixed_data))
+    with col3:
+        st.metric("Golden Records Resolved", counts.get("Duplication", 0))
+    with col4:
+        st.metric("Integrity Gains", f"{round((len(st.session_state.fixed_data) / len(st.session_state.failed_rows)) * 100, 1) if st.session_state.failed_rows else 0}%")
+
+    # Error Category Breakdown
+    st.markdown("### Failure Distribution by Category")
+    st.bar_chart(counts)
+else:
+    st.info("No failure data detected. Run the baseline validator to populate the report.")
+
+# 3. Agent Execution
+st.subheader("Refinement Execution")
+if st.button("Start Global Refinement Pipeline"):
     app = build_graph()
     logger = ObservabilityLogger()
     
     progress_bar = st.progress(0)
     status_text = st.empty()
     
-    for i, row in enumerate(st.session_state.failed_rows):
-        status_text.text(f"Processing row {i+1}...")
+    # In a real system we'd process all, but for demo we take a sample to keep it fast
+    sample_size = min(len(st.session_state.failed_rows), 50)
+    
+    it_rows = st.session_state.failed_rows[:sample_size]
+    
+    for i, row in enumerate(it_rows):
+        status_text.text(f"Refining record {i+1} of {sample_size} (Category: {', '.join(row.get('categories', []))})")
         
         initial_state = {
             "input_data": row["original_data"],
             "errors": row["errors"],
+            "categories": row.get("categories", []),
             "retry_count": 0
         }
         
@@ -61,10 +85,10 @@ if st.button("Start Autonomous Fixer"):
         if result.get("execution_success"):
             st.session_state.fixed_data.append(result["fixed_data"])
             
-        progress_bar.progress((i + 1) / len(st.session_state.failed_rows))
-        
-    status_text.text("Pipeline Complete. Check the Data Governance Report.")
+        progress_bar.progress((i + 1) / sample_size)
+    
+    status_text.success("Refinement Complete.")
 
 if len(st.session_state.fixed_data) > 0:
-    st.subheader("Cleaned Data Preview")
+    st.subheader("Refined 'Golden' Records")
     st.dataframe(pd.DataFrame(st.session_state.fixed_data))
