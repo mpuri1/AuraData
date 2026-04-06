@@ -1,5 +1,6 @@
 import os
 import json
+import sqlite3
 import pandas as pd
 from typing import TypedDict, Annotated, List, Dict, Any, Optional
 from langgraph.graph import StateGraph, END
@@ -24,9 +25,11 @@ class AgentState(TypedDict):
     execution_error: Optional[str]  # Stack trace if failed
     retry_count: int                # Circuit breaker counter
     fixed_data: Optional[Dict[str, Any]] # The corrected row
-    # Next-Level Audit Fields
     audit_findings: List[str]       # Issues found by the Auditor node
     is_audited: bool                # Whether the audit has passed
+    # Governance & Privacy Fields
+    anonymized_data: Optional[Dict[str, Any]] # PII Masked output
+    db_status: Optional[str]        # Persistence verification
 
 llm = ChatOpenAI(model="gpt-5.4-nano", temperature=0)
 
@@ -54,50 +57,41 @@ def deduplication_node(state: AgentState):
 
     return {
         "input_data": golden_record,
-        "analysis_result": f"Resolved duplicate conflict using window functions. Partition size: {len(partition)}."
+        "analysis_result": f"Resolved duplicate conflict. Partition size: {len(partition)}."
     }
 
 def analyzer_node(state: AgentState):
-    """Analyzes the failure and root cause, including audit feedback."""
+    """Analyzes the failure and root cause."""
     context = ""
     if state.get("audit_findings"):
-        context = f"\n\n🚨 PREVIOUS AUDIT REJECTION:\nThe following logical issues were found in your previous attempt:\n{state['audit_findings']}\nYou must fix these specific semantic flaws."
+        context = f"\n\n🚨 PREVIOUS AUDIT REJECTION:\n{state['audit_findings']}"
 
     prompt = PromptTemplate.from_template(
-        "You are an expert Data Engineer. A row of data failed validation.\n"
-        "Original Data: {data}\n"
-        "Validation Errors: {errors}{context}\n\n"
-        "Explain step-by-step why the validation failed and exactly what transformation is needed to fix it."
+        "You are an expert Data Engineer. Original Data: {data}\nValidation Errors: {errors}{context}\n"
+        "Explain transformed required to fix it."
     )
     chain = prompt | llm
     response = chain.invoke({"data": json.dumps(state["input_data"]), "errors": state["errors"], "context": context})
-    
     return {"analysis_result": response.content}
 
 def coder_node(state: AgentState):
     """Writes Python code to fix the data."""
     system_prompt = (
-        "You are an expert Python Developer. You write Python code to fix data issues.\n"
-        "You must return ONLY a Python function named `fix_data(row)` that takes a dictionary `row`. "
-        "DO NOT return markdown blocks, just the raw code.\n\n"
-        "Original Data: {data}\n"
-        "Analysis: {analysis}\n"
+        "You are an expert Python Developer. Return ONLY a function `fix_data(row)` returning dict.\n"
+        "Original Data: {data}\nAnalysis: {analysis}\n"
     )
-    
     if state.get("execution_error"):
-        system_prompt += "\nPrevious Code Execution Error:\n{error}\nFix the code based on the error."
-        
+        system_prompt += "\nError: {error}"
     prompt = PromptTemplate.from_template(system_prompt)
     chain = prompt | llm
     inputs = {"data": json.dumps(state["input_data"]), "analysis": state["analysis_result"], "error": state.get("execution_error", "")}
     response = chain.invoke(inputs)
-    
     code = response.content.strip()
     if code.startswith("```"): code = "\n".join(code.split("\n")[1:-1])
     return {"generated_code": code.strip()}
 
 def executor_node(state: AgentState):
-    """Executes the generated code and validates the output schema."""
+    """Executes the generated code and validates schema."""
     code = state["generated_code"]
     row = dict(state["input_data"]) 
     local_env = {}
@@ -110,47 +104,87 @@ def executor_node(state: AgentState):
         return {"execution_success": False, "execution_error": str(e), "retry_count": state.get("retry_count", 0) + 1}
 
 def auditor_node(state: AgentState):
-    """
-    Next-Level Guardrail Node: Performs independent semantic/logical verification.
-    Ensures 'hallucinations' (like futures dates or logically impossible amounts) are caught.
-    """
-    if not state.get("execution_success") or not state.get("fixed_data"):
-        return {"is_audited": False}
-
+    """Next-Level Guardrail Node: Performs independent semantic verification."""
+    if not state.get("execution_success"): return {"is_audited": False}
     prompt = PromptTemplate.from_template(
-        "You are a Data Governance Auditor. You check 'fixed' data for logical hallucinations.\n"
-        "Original Data: {original}\n"
-        "Fixed Data: {fixed}\n\n"
-        "Instructions: \n"
-        "1. Policy Logic: VIP policies must have high amounts (>500).\n"
-        "2. Date Logic: The filed date cannot be in the future (Today is {today}).\n"
-        "3. Semantic Check: The claim amount must be realistic for the policy type.\n\n"
-        "If the data is logically perfect, respond with 'AUDIT_PASSED'.\n"
-        "If there are issues, list exactly what is wrong."
+        "Audit data logic (Today: {today}). Original: {original}, Fixed: {fixed}. Respond 'AUDIT_PASSED' or list issues."
     )
-    
     chain = prompt | llm
     today = datetime.now().strftime("%Y-%m-%d")
     response = chain.invoke({"original": json.dumps(state["input_data"]), "fixed": json.dumps(state["fixed_data"]), "today": today})
-    
-    findings = []
     passed = "AUDIT_PASSED" in response.content.upper()
-    if not passed:
-        findings.append(response.content)
+    return {"is_audited": passed, "audit_findings": [response.content] if not passed else []}
+
+def privacy_node(state: AgentState):
+    """
+    Governance Node: Performs PII Anonymization.
+    Masks ZIP codes and sensitive IDs using model-driven patterns.
+    """
+    if not state.get("is_audited"): return state
+    
+    prompt = PromptTemplate.from_template(
+        "You are a Privacy Officer. Anonymize PII in this row: {data}. \n"
+        "Instructions: \n"
+        "1. zip_code: mask the last 2 digits with '*' (e.g., 90210 -> 902**).\n"
+        "2. claim_id: truncate to 5 characters and add '***'.\n"
+        "Return ONLY the modified JSON dictionary."
+    )
+    chain = prompt | llm
+    response = chain.invoke({"data": json.dumps(state["fixed_data"])})
+    
+    try:
+        anonymized = json.loads(response.content)
+        return {"anonymized_data": anonymized}
+    except:
+        # Fallback manual mask if LLM fails format
+        row = dict(state["fixed_data"])
+        if row.get("zip_code"): row["zip_code"] = f"{str(row['zip_code'])[:3]}**"
+        return {"anonymized_data": row}
+
+def persistence_node(state: AgentState):
+    """
+    Governance Node: Persistent Data Warehousing.
+    Syncs the refined, audited, anonymized record to a local SQLite database.
+    """
+    data = state.get("anonymized_data") or state.get("fixed_data")
+    if not data: return {"db_status": "Skipped (No data)"}
+
+    try:
+        conn = sqlite3.connect("refined_claims.db")
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS refined_records (
+                claim_id TEXT PRIMARY KEY,
+                policy_type TEXT,
+                state TEXT,
+                claim_amount REAL,
+                zip_code TEXT,
+                date_filed TEXT,
+                refined_at TEXT
+            )
+        ''')
         
-    return {"is_audited": passed, "audit_findings": findings}
+        cursor.execute('''
+            INSERT OR REPLACE INTO refined_records 
+            (claim_id, policy_type, state, claim_amount, zip_code, date_filed, refined_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            data.get("claim_id"), data.get("policy_type"), data.get("state"),
+            data.get("claim_amount"), data.get("zip_code"), data.get("date_filed"),
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ))
+        conn.commit()
+        conn.close()
+        return {"db_status": "Synced to SQLite"}
+    except Exception as e:
+        return {"db_status": f"DB Error: {str(e)}"}
 
 def route_execution(state: AgentState):
     if not state["execution_success"]:
-        if state.get("retry_count", 0) >= 3: return "max_retries"
-        return "retry_code"
-    
-    # NEW Routing: Add the Auditor check
+        return "retry_code" if state.get("retry_count", 0) < 3 else "max_retries"
     if not state.get("is_audited"):
-        if state.get("retry_count", 0) >= 3: return "max_retries"
-        return "retry_audit_analysis" # Send back to analyzer with audit feedback
-        
-    return "success"
+        return "retry_audit_analysis" if state.get("retry_count", 0) < 3 else "max_retries"
+    return "finalize"
 
 def build_graph():
     workflow = StateGraph(AgentState)
@@ -159,24 +193,29 @@ def build_graph():
     workflow.add_node("analyzer", analyzer_node)
     workflow.add_node("coder", coder_node)
     workflow.add_node("executor", executor_node)
-    workflow.add_node("auditor", auditor_node) # NEW Guardrail Node
+    workflow.add_node("auditor", auditor_node)
+    workflow.add_node("privacy", privacy_node) # NEW
+    workflow.add_node("persistence", persistence_node) # NEW
     
     workflow.set_entry_point("deduplicator")
     workflow.add_edge("deduplicator", "analyzer")
     workflow.add_edge("analyzer", "coder")
     workflow.add_edge("coder", "executor")
-    workflow.add_edge("executor", "auditor") # executor leads to auditor
+    workflow.add_edge("executor", "auditor")
     
     workflow.add_conditional_edges(
         "auditor",
         route_execution,
         {
-            "success": END,
+            "finalize": "privacy",
             "retry_code": "coder",
             "retry_audit_analysis": "analyzer",
             "max_retries": END
         }
     )
+    
+    workflow.add_edge("privacy", "persistence")
+    workflow.add_edge("persistence", END)
     
     return workflow.compile()
 
