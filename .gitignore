@@ -16,3 +16,4 @@ wheels/
 governance_log.md
 detailed_trace.jsonl
 WORK_LOG.md
+.env
