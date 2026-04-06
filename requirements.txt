@@ -1,0 +1,10 @@
+langgraph
+langchain
+langchain-aws
+langchain-openai
+pandas
+pydantic
+streamlit
+fastapi
+uvicorn
+sqlalchemy
