@@ -4,7 +4,7 @@ import pandas as pd
 from typing import TypedDict, Annotated, List, Dict, Any, Optional
 from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 from baseline import ClaimSchema
 from pydantic import ValidationError
 from dotenv import load_dotenv
@@ -16,6 +16,7 @@ load_dotenv()
 class AgentState(TypedDict):
     input_data: Dict[str, Any]      # The raw failed row dict
     errors: List[str]               # The Validation errors
+    categories: List[str]            # Error categories (Duplication, Sparsity, etc)
     analysis_result: str            # Output of Analyzer Node
     generated_code: str             # Python code from Coder Node
     execution_success: bool         # Result of Executor
@@ -23,16 +24,54 @@ class AgentState(TypedDict):
     retry_count: int                # Circuit breaker counter
     fixed_data: Optional[Dict[str, Any]] # The corrected row
 
-# Try to load standard models.
-# Note: For strict adherence to the project scope, swap ChatOpenAI to ChatBedrock:
-# from langchain_aws import ChatBedrock
-# llm = ChatBedrock(model_id="anthropic.claude-3-sonnet-20240229-v1:0", region_name="us-east-1")
 llm = ChatOpenAI(model="gpt-5.4-nano", temperature=0)
+
+def deduplication_node(state: AgentState):
+    """
+    Lead-Level Node: Resolves duplicate claim_id conflicts using window functions.
+    This node 'heals' records by merging supplemental data from duplicates.
+    """
+    if "Duplication" not in state.get("categories", []):
+        return state # Skip if not a duplicate
+    
+    # In a real environment, we'd pull all records for this ID from the DB
+    # For this demo, we'll simulate the 'Window Function' resolution logic
+    # We fetch the duplicates from the original claims_data.csv
+    df = pd.read_csv("claims_data.csv")
+    claim_id = state["input_data"]["claim_id"]
+    
+    # Equivalent to: ROW_NUMBER() OVER(PARTITION BY claim_id ORDER BY date_filed DESC, claim_amount DESC)
+    partition = df[df['claim_id'] == claim_id].copy()
+    
+    # Lead Strategy: Merge supplemental data (Data Healing)
+    # We take the most recent record as the 'Golden' base
+    partition['date_filed'] = pd.to_datetime(partition['date_filed'], errors='coerce')
+    partition = partition.sort_values(by=['date_filed', 'claim_amount'], ascending=False)
+    
+    golden_record = partition.iloc[0].to_dict()
+    
+    # Heal missing values (e.g., if golden has NULL zip_code but a duplicate has it)
+    for col in partition.columns:
+        if pd.isna(golden_record[col]):
+            # Find the first non-null value for this column among duplicates
+            non_null_values = partition[col].dropna()
+            if not non_null_values.empty:
+                golden_record[col] = non_null_values.iloc[0]
+
+    # Convert everything to strings/floats for JSON compatibility
+    for k, v in golden_record.items():
+        if pd.isna(v): golden_record[k] = None
+        elif isinstance(v, pd.Timestamp): golden_record[k] = v.strftime("%Y-%m-%d")
+
+    return {
+        "input_data": golden_record,
+        "analysis_result": f"Resolved duplicate conflict using window-function partition. Selected latest record and 'healed' missing fields from {len(partition)-1} duplicates."
+    }
 
 def analyzer_node(state: AgentState):
     """Analyzes the failure and root cause."""
     prompt = PromptTemplate.from_template(
-        "You are an expert Data Engineer. A row of data failed Pydantic validation.\n"
+        "You are an expert Data Engineer. A row of data failed validation.\n"
         "Original Data: {data}\n"
         "Validation Errors: {errors}\n\n"
         "Explain step-by-step why the validation failed and exactly what transformation is needed to fix it."
@@ -52,7 +91,6 @@ def coder_node(state: AgentState):
         "Analysis: {analysis}\n"
     )
     
-    # If there was a previous error, provide it
     if state.get("execution_error"):
         system_prompt += "\nPrevious Code Execution Error:\n{error}\nFix the code based on the error."
         
@@ -81,10 +119,7 @@ def executor_node(state: AgentState):
     
     local_env = {}
     try:
-        # Execute the string as Python code
         exec(code, {}, local_env)
-        
-        # the code must define fix_data
         if "fix_data" not in local_env:
             raise ValueError("Code did not define `fix_data` function.")
             
@@ -99,13 +134,6 @@ def executor_node(state: AgentState):
             "execution_error": None,
             "retry_count": state.get("retry_count", 0) + 1
         }
-    except ValidationError as e:
-        error_msgs = [f"{err['loc'][0]}: {err['msg']}" for err in e.errors()]
-        return {
-            "execution_success": False,
-            "execution_error": f"Validation Error on output: {error_msgs}",
-            "retry_count": state.get("retry_count", 0) + 1
-        }
     except Exception as e:
         return {
             "execution_success": False,
@@ -117,18 +145,20 @@ def route_execution(state: AgentState):
     """Determine whether to retry coding or finish."""
     if state["execution_success"]:
         return "success"
-    if state["retry_count"] >= 3:
+    if state.get("retry_count", 0) >= 3:
         return "max_retries"
     return "retry"
 
 def build_graph():
     workflow = StateGraph(AgentState)
     
+    workflow.add_node("deduplicator", deduplication_node) # Lead-Level Batch Node
     workflow.add_node("analyzer", analyzer_node)
     workflow.add_node("coder", coder_node)
     workflow.add_node("executor", executor_node)
     
-    workflow.set_entry_point("analyzer")
+    workflow.set_entry_point("deduplicator")
+    workflow.add_edge("deduplicator", "analyzer")
     workflow.add_edge("analyzer", "coder")
     workflow.add_edge("coder", "executor")
     
@@ -145,30 +175,5 @@ def build_graph():
     return workflow.compile()
 
 if __name__ == "__main__":
-    if not os.environ.get("OPENAI_API_KEY"):
-        print("Please set OPENAI_API_KEY environment variable. Exiting.")
-        exit(1)
-        
-    # Read failed rows
-    with open("failed_rows.json", "r") as f:
-        failed_rows = json.load(f)
-        
-    print(f"Loaded {len(failed_rows)} failed rows. Processing first failure for demonstration...")
-    test_row = failed_rows[0]
-    
-    initial_state = {
-        "input_data": test_row["original_data"],
-        "errors": test_row["errors"],
-        "retry_count": 0
-    }
-    
-    app = build_graph()
-    result = app.invoke(initial_state)
-    
-    print("\n--- Final Agent Execution Summary ---")
-    print(f"Original: {result['input_data']}")
-    print(f"Success:  {result.get('execution_success', False)}")
-    if result.get('execution_success'):
-        print(f"Fixed:    {result['fixed_data']}")
-    else:
-        print(f"Final Error: {result.get('execution_error')}")
+    # Test stub
+    pass
