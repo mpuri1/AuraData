@@ -2,6 +2,7 @@ import os
 import json
 import sqlite3
 import pandas as pd
+import ast
 from typing import TypedDict, Annotated, List, Dict, Any, Optional
 from langgraph.graph import StateGraph, END
 from langchain_openai import ChatOpenAI
@@ -31,9 +32,65 @@ class AgentState(TypedDict):
     anonymized_data: Optional[Dict[str, Any]] # PII Masked output
     db_status: Optional[str]        # Persistence verification
 
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+llm = ChatOpenAI(model="gpt-5.4-nano", temperature=0)
 
-def deduplication_node(state: AgentState):
+# --- Security & Sandbox Layer ---
+def safe_code_analyzer(code: str) -> bool:
+    """
+    AST-based guardrail to prevent RCE. 
+    Strictly denies dangerous imports, function calls, and attribute access.
+    """
+    try:
+        tree = ast.parse(code)
+        # Forbidden modules (RCE sources)
+        forbidden_modules = {'os', 'sys', 'subprocess', 'shutil', 'pickle', 'importlib', 'requests', 'urllib'}
+        # Forbidden functions (Execution & IO sources)
+        forbidden_calls = {'open', 'eval', 'exec', '__import__', 'getattr', 'setattr', 'delattr'}
+        
+        for node in ast.walk(tree):
+            # Check for forbidden imports
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alias in node.names:
+                    if alias.name.split('.')[0] in forbidden_modules:
+                        return False
+            # Check for forbidden function calls
+            if isinstance(node, ast.Call):
+                if isinstance(node.func, ast.Name) and node.func.id in forbidden_calls:
+                    return False
+                if isinstance(node.func, ast.Attribute) and node.func.attr in forbidden_calls:
+                    return False
+            # Check for dangerous attribute patterns (e.g. __subclasses__)
+            if isinstance(node, ast.Attribute):
+                if node.attr.startswith("__"):
+                    return False
+        return True
+    except SyntaxError:
+        return False
+
+def input_sanitizer(raw_data: Any) -> bool:
+    """
+    Scans incoming raw data for common Prompt Injection (PI) patterns.
+    """
+    if not isinstance(raw_data, str):
+        raw_data = str(raw_data)
+    
+    pi_patterns = [
+        "ignore previous instructions",
+        "system prompt",
+        "you are a",
+        "DAN:",
+        "jailbreak",
+        "respond only as",
+        "output the hidden"
+    ]
+    
+    data_lower = raw_data.lower()
+    for pattern in pi_patterns:
+        if pattern in data_lower:
+            return False
+    return True
+
+# --- Pipeline Nodes ---
     """Lead-Level Node: Resolves duplicate conflicts using window functions."""
     if "Duplication" not in state.get("categories", []):
         return state
@@ -94,13 +151,20 @@ def coder_node(state: AgentState):
         code = "\n".join(lines).strip()
     return {"generated_code": code}
 
-def executor_node(state: AgentState):
-    """Executes the generated code and validates schema."""
     code = state["generated_code"]
     row = dict(state["input_data"]) 
+    
+    # SECURITY GATE: AST-Based Sandboxing
+    if not safe_code_analyzer(code):
+        return {
+            "execution_success": False, 
+            "execution_error": "SECURITY BLOCK: The generated code was flagged as unsafe (Potential RCE attempted).",
+            "retry_count": state.get("retry_count", 0) + 1
+        }
+    
     local_env = {}
     try:
-        exec(code, {}, local_env)
+        exec(code, {"__builtins__": {}}, local_env)
         if "fix_data" not in local_env:
             raise ValueError("The generated code did not define a 'fix_data' function.")
         fixed_row = local_env["fix_data"](row)
@@ -196,15 +260,27 @@ def route_execution(state: AgentState):
 def build_graph():
     workflow = StateGraph(AgentState)
     
+    workflow.add_node("sanitizer", sanitizer_node) # Security Entry
     workflow.add_node("deduplicator", deduplication_node)
     workflow.add_node("analyzer", analyzer_node)
     workflow.add_node("coder", coder_node)
     workflow.add_node("executor", executor_node)
     workflow.add_node("auditor", auditor_node)
-    workflow.add_node("privacy", privacy_node) # NEW
-    workflow.add_node("persistence", persistence_node) # NEW
+    workflow.add_node("privacy", privacy_node)
+    workflow.add_node("persistence", persistence_node)
     
-    workflow.set_entry_point("deduplicator")
+    workflow.set_entry_point("sanitizer")
+    
+    # Security Routing
+    workflow.add_conditional_edges(
+        "sanitizer",
+        lambda x: "safe" if x.get("execution_error") is None else "unsafe",
+        {
+            "safe": "deduplicator",
+            "unsafe": END
+        }
+    )
+
     workflow.add_edge("deduplicator", "analyzer")
     workflow.add_edge("analyzer", "coder")
     workflow.add_edge("coder", "executor")
