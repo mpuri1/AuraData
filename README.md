@@ -9,7 +9,6 @@ When standard Pydantic validation fails, instead of dropping the row, the system
 
 This project is built using:
 - **LangGraph**: Used instead of CrewAI because ETL requires tightly controlled, cyclic, and stateful DAG execution rather than pure conversational personas.
-- **Pydantic**: The baseline structure validator for establishing data ground truth.
 - **Streamlit & Docker**: Provides the interactive evaluation UI and containerizes the solution.
 
 ### LangGraph Nodes

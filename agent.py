@@ -91,6 +91,14 @@ def input_sanitizer(raw_data: Any) -> bool:
     return True
 
 # --- Pipeline Nodes ---
+def sanitizer_node(state: AgentState):
+    """Security Gateway: Scans input data for Prompt Injection patterns."""
+    is_safe = input_sanitizer(state.get("input_data", {}))
+    if not is_safe:
+        return {"execution_error": "SECURITY BLOCK: Prompt injection detected. Record quarantined."}
+    return state
+
+def deduplication_node(state: AgentState):
     """Lead-Level Node: Resolves duplicate conflicts using window functions."""
     if "Duplication" not in state.get("categories", []):
         return state
