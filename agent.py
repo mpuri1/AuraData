@@ -30,6 +30,7 @@ class AgentState(TypedDict):
     is_audited: bool                # Whether the audit has passed
     # Governance & Privacy Fields
     anonymized_data: Optional[Dict[str, Any]] # PII Masked output
+    experiment_variant: Optional[str]        # MASKING or SYNTHETIC
     db_status: Optional[str]        # Persistence verification
 
 llm = ChatOpenAI(model="gpt-5.4-nano", temperature=0)
@@ -91,6 +92,14 @@ def input_sanitizer(raw_data: Any) -> bool:
     return True
 
 # --- Pipeline Nodes ---
+def sanitizer_node(state: AgentState):
+    """Security Gateway: Scans input data for Prompt Injection patterns."""
+    is_safe = input_sanitizer(state.get("input_data", {}))
+    if not is_safe:
+        return {"execution_error": "SECURITY BLOCK: Prompt injection detected. Record quarantined."}
+    return state
+
+def deduplication_node(state: AgentState):
     """Lead-Level Node: Resolves duplicate conflicts using window functions."""
     if "Duplication" not in state.get("categories", []):
         return state
@@ -189,26 +198,42 @@ def auditor_node(state: AgentState):
 
 def privacy_node(state: AgentState):
     """
-    Governance Node: Performs PII Anonymization.
-    Masks ZIP codes and sensitive IDs using model-driven patterns.
+    Governance Node: Performs PII Anonymization based on Experiment Variant.
+    Variant A (MASKING): Redacts sensitive fields.
+    Variant B (SYNTHETIC): Replaces values with statistically valid synthetic data.
     """
     if not state.get("is_audited"): return state
     
+    variant = state.get("experiment_variant", "MASKING")
+    
+    if variant == "SYNTHETIC":
+        strategy_prompt = (
+            "Strategy: SYNTHETIC DATA REPLACEMENT.\n"
+            "1. zip_code: replace with a different valid 5-digit zip code from the same state.\n"
+            "2. claim_id: generate a new unique 8-character ID.\n"
+            "Goal: Maintain data utility for statistical modeling while removing the link to the original record."
+        )
+    else:
+        strategy_prompt = (
+            "Strategy: DATA MASKING.\n"
+            "1. zip_code: mask the last 2 digits with '*' (e.g., 90210 -> 902**).\n"
+            "2. claim_id: truncate to 5 characters and add '***'.\n"
+            "Goal: Maximum redaction of identifying components."
+        )
+
     prompt = PromptTemplate.from_template(
-        "You are a Privacy Officer. Anonymize PII in this row: {data}. \n"
-        "Instructions: \n"
-        "1. zip_code: mask the last 2 digits with '*' (e.g., 90210 -> 902**).\n"
-        "2. claim_id: truncate to 5 characters and add '***'.\n"
+        "You are a Privacy Officer. Apply the following strategy to this row: {data}. \n"
+        "{strategy}\n"
         "Return ONLY the modified JSON dictionary."
     )
     chain = prompt | llm
-    response = chain.invoke({"data": json.dumps(state["fixed_data"])})
+    response = chain.invoke({"data": json.dumps(state["fixed_data"]), "strategy": strategy_prompt})
     
     try:
         anonymized = json.loads(response.content)
         return {"anonymized_data": anonymized}
     except Exception:
-        # Fallback manual mask if LLM fails format
+        # Fallback manual mask
         row = dict(state["fixed_data"])
         if row.get("zip_code"): row["zip_code"] = f"{str(row['zip_code'])[:3]}**"
         return {"anonymized_data": row}

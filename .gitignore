@@ -13,7 +13,6 @@ wheels/
 *.csv
 *.json
 *.jsonl
-governance_log.md
 detailed_trace.jsonl
-WORK_LOG.md
 .env
+prn_docs/
