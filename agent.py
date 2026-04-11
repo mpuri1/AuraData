@@ -11,6 +11,7 @@ from baseline import ClaimSchema
 from pydantic import ValidationError
 from dotenv import load_dotenv
 from datetime import datetime
+from src.anomaly_detector import PrivacyAnomalyDetector
 
 # Load variables from .env if present
 load_dotenv()
@@ -32,6 +33,7 @@ class AgentState(TypedDict):
     anonymized_data: Optional[Dict[str, Any]] # PII Masked output
     experiment_variant: Optional[str]        # MASKING or SYNTHETIC
     db_status: Optional[str]        # Persistence verification
+    anomaly_report: Optional[Dict[str, Any]] # Z-score outlier results
 
 llm = ChatOpenAI(model="gpt-5.4-nano", temperature=0)
 
@@ -196,6 +198,25 @@ def auditor_node(state: AgentState):
     passed = "AUDIT_PASSED" in response.content.upper()
     return {"is_audited": passed, "audit_findings": [response.content] if not passed else []}
 
+def anomaly_detector_node(state: AgentState):
+    """
+    Staff-Level Security Node: Detects privacy-risk anomalies using Z-scores.
+    Evaluates the current record's privacy exposure and checks for session spikes.
+    """
+    detector = PrivacyAnomalyDetector()
+    
+    # Calculate simple exposure score for the session
+    fixed_data = state.get("fixed_data", {})
+    exposure_score = 0.0
+    if fixed_data.get("zip_code"): exposure_score += 0.5
+    if fixed_data.get("claim_id"): exposure_score += 0.2
+    if fixed_data.get("claim_amount"): exposure_score += 0.3
+    
+    # Log and check for anomalies
+    detector.log_session_risk(exposure_score)
+    report = detector.check_for_anomaly(exposure_score)
+    
+    return {"anomaly_report": report}
 def privacy_node(state: AgentState):
     """
     Governance Node: Performs PII Anonymization based on Experiment Variant.
@@ -293,6 +314,7 @@ def build_graph():
     workflow.add_node("coder", coder_node)
     workflow.add_node("executor", executor_node)
     workflow.add_node("auditor", auditor_node)
+    workflow.add_node("anomaly_detector", anomaly_detector_node)
     workflow.add_node("privacy", privacy_node)
     workflow.add_node("persistence", persistence_node)
     
@@ -317,13 +339,14 @@ def build_graph():
         "auditor",
         route_execution,
         {
-            "finalize": "privacy",
+            "finalize": "anomaly_detector",
             "retry_code": "coder",
             "retry_audit_analysis": "analyzer",
             "max_retries": END
         }
     )
     
+    workflow.add_edge("anomaly_detector", "privacy")
     workflow.add_edge("privacy", "persistence")
     workflow.add_edge("persistence", END)
     
