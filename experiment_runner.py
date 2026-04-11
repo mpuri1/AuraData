@@ -39,10 +39,15 @@ def run_privacy_experiment():
             }
             
             final_state = graph.invoke(state)
+            anomaly = final_state.get("anomaly_report", {})
             
+            if anomaly.get("is_anomaly"):
+                print(f"🚨 PRIVACY ALERT: Anomaly Detected (Z-Score: {anomaly['z_score']}) - Severity: {anomaly['severity']}")
+
             results[variant].append({
                 "original": row["original_data"],
-                "anonymized": final_state.get("anonymized_data")
+                "anonymized": final_state.get("anonymized_data"),
+                "privacy_anomaly": anomaly
             })
 
     # Save Results for Comparison
