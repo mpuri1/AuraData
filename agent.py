@@ -5,7 +5,7 @@ import pandas as pd
 import ast
 from typing import TypedDict, Annotated, List, Dict, Any, Optional
 from langgraph.graph import StateGraph, END
-from langchain_openai import ChatOpenAI
+from llm_provider import get_llm, get_provider_info
 from langchain_core.prompts import PromptTemplate
 from baseline import ClaimSchema
 from pydantic import ValidationError
@@ -35,7 +35,11 @@ class AgentState(TypedDict):
     db_status: Optional[str]        # Persistence verification
     anomaly_report: Optional[Dict[str, Any]] # Z-score outlier results
 
-llm = ChatOpenAI(model="gpt-5.4-nano", temperature=0)
+# LLM is configured via LLM_PROVIDER in .env ("openai" or "bedrock")
+# See llm_provider.py for full configuration options.
+_provider_info = get_provider_info()
+print(f"[AuraData] Using LLM provider: {_provider_info['provider']} / model: {_provider_info['model']}")
+llm = get_llm(temperature=0)
 
 # --- Security & Sandbox Layer ---
 def safe_code_analyzer(code: str) -> bool:
