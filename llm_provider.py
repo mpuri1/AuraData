@@ -1,5 +1,5 @@
 """
-AuraData LLM Provider Factory
+NexusData LLM Provider Factory
 ==============================
 Provides a runtime-configurable LLM instance for the LangGraph pipeline.
 

@@ -10,7 +10,7 @@ def run_privacy_experiment():
     Runs an A/B test between MASKING and SYNTHETIC privacy treatments.
     Demonstrates data utility vs. privacy trade-offs.
     """
-    print("\n🔐 Starting AuraData Privacy Experiment...")
+    print("\n🔐 Starting NexusData Privacy Experiment...")
     
     if not os.path.exists("failed_rows.json"):
         print("⚠️ No input data found (failed_rows.json). Run baseline.py first.")

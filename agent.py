@@ -38,7 +38,7 @@ class AgentState(TypedDict):
 # LLM is configured via LLM_PROVIDER in .env ("openai" or "bedrock")
 # See llm_provider.py for full configuration options.
 _provider_info = get_provider_info()
-print(f"[AuraData] Using LLM provider: {_provider_info['provider']} / model: {_provider_info['model']}")
+print(f"[NexusData] Using LLM provider: {_provider_info['provider']} / model: {_provider_info['model']}")
 llm = get_llm(temperature=0)
 
 # --- Security & Sandbox Layer ---

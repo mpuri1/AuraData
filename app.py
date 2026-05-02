@@ -10,8 +10,8 @@ from dotenv import load_dotenv
 # Load variables from .env if present
 load_dotenv()
 
-st.set_page_config(page_title="AuraData | Governance Refinement", layout="wide")
-st.title("AuraData: Autonomous Governance & Refinement Engine")
+st.set_page_config(page_title="NexusData | Governance Refinement", layout="wide")
+st.title("NexusData: Autonomous Governance & Refinement Engine")
 
 # 1. State Initialization
 if 'failed_rows' not in st.session_state:
