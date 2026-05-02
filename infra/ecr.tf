@@ -1,15 +1,15 @@
 # ---------------------------------------------------------------------------
-# ECR — Container Registry for AuraData Docker Image
-# Stores the Docker image built from AuraData's Dockerfile.
+# ECR — Container Registry for NexusData Docker Image
+# Stores the Docker image built from NexusData's Dockerfile.
 # The image is tagged and pushed here for deployment to ECS/App Runner/EC2.
 #
 # Build and push:
-#   docker build -t auradata .
-#   docker tag auradata:latest <ecr_repo_url>:latest
+#   docker build -t nexusdata .
+#   docker tag nexusdata:latest <ecr_repo_url>:latest
 #   docker push <ecr_repo_url>:latest
 # ---------------------------------------------------------------------------
 
-resource "aws_ecr_repository" "auradata" {
+resource "aws_ecr_repository" "nexusdata" {
   name                 = "${var.ecr_repo_name}-${var.environment}"
   image_tag_mutability = "MUTABLE"
 
@@ -23,8 +23,8 @@ resource "aws_ecr_repository" "auradata" {
 }
 
 # Lifecycle policy: retain only the last N tagged images to control storage costs
-resource "aws_ecr_lifecycle_policy" "auradata" {
-  repository = aws_ecr_repository.auradata.name
+resource "aws_ecr_lifecycle_policy" "nexusdata" {
+  repository = aws_ecr_repository.nexusdata.name
 
   policy = jsonencode({
     rules = [

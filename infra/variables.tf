@@ -16,15 +16,15 @@ variable "environment" {
 }
 
 variable "ecr_repo_name" {
-  description = "Name of the ECR repository for the AuraData Docker image"
+  description = "Name of the ECR repository for the NexusData Docker image"
   type        = string
-  default     = "auradata"
+  default     = "nexusdata"
 }
 
 variable "claims_bucket_name" {
   description = "S3 bucket for claims data input and refined output"
   type        = string
-  default     = "auradata-claims"
+  default     = "nexusdata-claims"
 }
 
 variable "image_retention_count" {

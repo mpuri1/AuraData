@@ -1,16 +1,16 @@
-# AuraData — AWS Infrastructure (Terraform)
+# NexusData — AWS Infrastructure (Terraform)
 
-This module provisions the production AWS infrastructure for the AuraData autonomous claims correction pipeline.
+This module provisions the production AWS infrastructure for the NexusData autonomous claims correction pipeline.
 
 ## What It Provisions
 
 | Resource | Type | Purpose |
 |---|---|---|
-| `auradata-{env}` | ECR Repository | Docker image registry (built from `Dockerfile`) |
+| `nexusdata-{env}` | ECR Repository | Docker image registry (built from `Dockerfile`) |
 | ECR Lifecycle Policy | ECR | Retain last 10 tagged images; expire untagged after 7d |
-| `auradata-claims-{env}` | S3 Bucket | Claims input + refined output storage |
+| `nexusdata-claims-{env}` | S3 Bucket | Claims input + refined output storage |
 | S3 Lifecycle Rules | S3 | Raw: 90d → Refined: STANDARD_IA → GLACIER (7yr insurance compliance) |
-| `auradata-runtime-{env}` | IAM Role | Bedrock invoke + S3 claims + ECR pull permissions |
+| `nexusdata-runtime-{env}` | IAM Role | Bedrock invoke + S3 claims + ECR pull permissions |
 
 ## Dual LLM Support
 
@@ -33,8 +33,8 @@ terraform apply -var="environment=dev"
 # After terraform apply:
 ECR_URL=$(terraform output -raw ecr_repository_url)
 aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin $ECR_URL
-docker build -t auradata:latest ..
-docker tag auradata:latest $ECR_URL:latest
+docker build -t nexusdata:latest ..
+docker tag nexusdata:latest $ECR_URL:latest
 docker push $ECR_URL:latest
 ```
 
@@ -53,6 +53,6 @@ LLM_PROVIDER=bedrock   # enables Bedrock in llm_provider.py
 |---|---|---|
 | `aws_region` | `us-east-1` | AWS region |
 | `environment` | `dev` | dev / staging / prod |
-| `ecr_repo_name` | `auradata` | ECR repository name prefix |
-| `claims_bucket_name` | `auradata-claims` | S3 bucket name prefix |
+| `ecr_repo_name` | `nexusdata` | ECR repository name prefix |
+| `claims_bucket_name` | `nexusdata-claims` | S3 bucket name prefix |
 | `image_retention_count` | `10` | ECR image versions to keep |

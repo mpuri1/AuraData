@@ -1,8 +1,8 @@
 # ---------------------------------------------------------------------------
 # S3 — Claims Data Storage
 # Replaces local claims_data.csv and refined_claims.db with cloud-native storage.
-# Input prefix:   s3://auradata-claims-{env}/input/
-# Refined prefix: s3://auradata-claims-{env}/refined/
+# Input prefix:   s3://nexusdata-claims-{env}/input/
+# Refined prefix: s3://nexusdata-claims-{env}/refined/
 # ---------------------------------------------------------------------------
 
 resource "aws_s3_bucket" "claims" {

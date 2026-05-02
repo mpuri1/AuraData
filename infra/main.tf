@@ -8,7 +8,7 @@ terraform {
   # Uncomment to enable remote state:
   # backend "s3" {
   #   bucket         = "your-terraform-state-bucket"
-  #   key            = "auradata/terraform.tfstate"
+  #   key            = "nexusdata/terraform.tfstate"
   #   region         = "us-east-1"
   #   dynamodb_table = "terraform-locks"
   #   encrypt        = true
@@ -20,7 +20,7 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project     = "AuraData"
+      Project     = "NexusData"
       Environment = var.environment
       ManagedBy   = "Terraform"
     }
