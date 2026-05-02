@@ -1,4 +1,4 @@
-# AuraData: Autonomous Data Refinement Engine
+# NexusData: Autonomous Data Refinement Engine
 
 ## Overview
 This repository contains a self-correcting Agentic ETL pipeline. It replaces brittle, rules-based static data validation pipelines using an **LLM-as-a-Judge** and an autonomous **LangGraph self-correcting coding loop**.
@@ -20,7 +20,7 @@ This project is built using:
 
 1. Navigate to the project directory:
    ```bash
-   cd AuraData
+   cd NexusData
    ```
 2. Make sure you have your dependencies installed:
    ```bash
